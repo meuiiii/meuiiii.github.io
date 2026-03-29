@@ -191,8 +191,16 @@
       background: #fff6f6;
     }
 
+    .editor-actions {
+      margin-top: 0.85rem;
+      display: flex;
+      gap: 0.65rem;
+      flex-wrap: wrap;
+    }
+
     .remove-btn,
-    .add-btn {
+    .add-btn,
+    .defaults-btn {
       border-radius: 8px;
       padding: 0.55rem 0.85rem;
       font-size: 0.85rem;
@@ -208,13 +216,21 @@
     }
 
     .add-btn {
-      margin-top: 0.85rem;
       background: #e3eef5;
       color: #27485d;
     }
 
     .add-btn:hover {
       background: #d4e4ef;
+    }
+
+    .defaults-btn {
+      background: #f5eadb;
+      color: #7a5222;
+    }
+
+    .defaults-btn:hover {
+      background: #eedcc5;
     }
 
     .editor-status {
@@ -252,7 +268,10 @@
       <p class="events-title">Edit Timers</p>
       <p class="events-subtitle">Set each alert using the same countdown format as the timer above. Example: <strong>25:30</strong>. Changes apply directly from this page.</p>
       <div id="eventList" class="event-list"></div>
-      <button type="button" class="add-btn" onclick="addEventRow()">Add Timer</button>
+      <div class="editor-actions">
+        <button type="button" class="add-btn" onclick="addEventRow()">Add Timer</button>
+        <button type="button" class="defaults-btn" onclick="resetEventsToDefaults()">Reset Timers to Defaults</button>
+      </div>
       <p id="editorStatus" class="editor-status" aria-live="polite"></p>
     </section>
     <section class="howto" aria-label="How the timer works">
@@ -269,9 +288,10 @@
       { time: 630, text: "Jungle camps spawning in 30 seconds." },
       { time: 930, text: "Jungle boss spawning in 30 seconds." },
       { time: 1230, text: "Jungle camps spawning in 30 seconds." },
-      { time: 1530, text: "Jungle boss spawning in 30 seconds." }
+      { time: 1530, text: "Jungle camps spawning in 30 seconds." }
     ];
     const TOTAL_SECONDS = 31 * 60;
+    const EVENTS_STORAGE_KEY = "wwm-gvg-timers-events";
 
     let events = defaultEvents.map((event) => ({ ...event }));
     let endTime = null;
@@ -318,7 +338,61 @@
       document.getElementById("editorStatus").innerText = message;
     }
 
-    function createEventRow(event = { time: 0, text: "New alert" }) {
+    function eventToEditorRow(event) {
+      return {
+        displayTime: elapsedToDisplayTime(event.time),
+        text: event.text
+      };
+    }
+
+    function getEditorRowsSnapshot() {
+      return Array.from(document.querySelectorAll(".event-row")).map((row) => ({
+        displayTime: row.querySelector(".event-input").value,
+        text: row.querySelector(".message-input").value
+      }));
+    }
+
+    function saveEventDraft(rows) {
+      try {
+        localStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(rows));
+      } catch (error) {
+        console.warn("Unable to save timer changes.", error);
+      }
+    }
+
+    function clearSavedEventDraft() {
+      try {
+        localStorage.removeItem(EVENTS_STORAGE_KEY);
+      } catch (error) {
+        console.warn("Unable to clear saved timer changes.", error);
+      }
+    }
+
+    function loadSavedEventDraft() {
+      try {
+        const storedValue = localStorage.getItem(EVENTS_STORAGE_KEY);
+        if (!storedValue) {
+          return null;
+        }
+
+        const parsed = JSON.parse(storedValue);
+        if (!Array.isArray(parsed)) {
+          return null;
+        }
+
+        return parsed
+          .filter((row) => row && typeof row.displayTime === "string" && typeof row.text === "string")
+          .map((row) => ({
+            displayTime: row.displayTime,
+            text: row.text
+          }));
+      } catch (error) {
+        console.warn("Unable to restore saved timer changes.", error);
+        return null;
+      }
+    }
+
+    function createEventRow(event = { displayTime: elapsedToDisplayTime(0), text: "New alert" }) {
       const row = document.createElement("div");
       row.className = "event-row";
 
@@ -326,7 +400,7 @@
       timeInput.type = "text";
       timeInput.className = "event-input";
       timeInput.placeholder = "MM:SS";
-      timeInput.value = elapsedToDisplayTime(event.time);
+      timeInput.value = event.displayTime;
       timeInput.setAttribute("aria-label", "Alert time");
       timeInput.addEventListener("input", syncEventsFromEditor);
 
@@ -353,22 +427,33 @@
       return row;
     }
 
-    function renderEventEditor() {
+    function renderEventEditor(savedRows = loadSavedEventDraft()) {
       const eventList = document.getElementById("eventList");
       eventList.innerHTML = "";
-      events.forEach((event) => {
+      const rowsToRender = Array.isArray(savedRows) ? savedRows : events.map(eventToEditorRow);
+
+      rowsToRender.forEach((event) => {
         eventList.appendChild(createEventRow(event));
       });
       syncEventsFromEditor();
     }
 
     function addEventRow() {
-      document.getElementById("eventList").appendChild(createEventRow({ time: 0, text: "New alert" }));
+      document.getElementById("eventList").appendChild(createEventRow({ displayTime: elapsedToDisplayTime(0), text: "New alert" }));
       syncEventsFromEditor();
+    }
+
+    function resetEventsToDefaults() {
+      clearSavedEventDraft();
+      events = defaultEvents.map((event) => ({ ...event }));
+      renderEventEditor(events.map(eventToEditorRow));
+      setEditorStatus("Timers restored to defaults.");
     }
 
     function syncEventsFromEditor() {
       const rows = Array.from(document.querySelectorAll(".event-row"));
+      saveEventDraft(getEditorRowsSnapshot());
+
       const nextEvents = [];
       let errorMessage = "";
 
