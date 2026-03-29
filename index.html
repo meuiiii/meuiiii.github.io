@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WWM GVG Timers</title>
+  <style>
+    :root {
+      --bg: #f4f8fb;
+      --card: #ffffff;
+      --text: #1d2935;
+      --accent: #1f7a8c;
+      --accent-hover: #176576;
+      --border: #d9e4ec;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: radial-gradient(circle at top left, #e7f3ff 0%, var(--bg) 45%, #eef8f0 100%);
+      color: var(--text);
+      padding: 1rem;
+    }
+
+    .card {
+      width: min(560px, 100%);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.5rem;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+    }
+
+    h2 {
+      margin: 0 0 1rem;
+      font-size: 1.5rem;
+    }
+
+    .controls {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 0.6rem 1rem;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s ease, transform 0.1s ease;
+    }
+
+    #startBtn {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    #startBtn:hover {
+      background: var(--accent-hover);
+    }
+
+    #resetBtn {
+      background: #e8eff5;
+      color: var(--text);
+    }
+
+    #resetBtn:hover {
+      background: #dbe7f0;
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    #time {
+      margin: 0;
+      font-size: clamp(2rem, 8vw, 4rem);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .hint {
+      margin-top: 0.75rem;
+      font-size: 0.9rem;
+      color: #526474;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h2>WWM GVG Timers</h2>
+    <div class="controls">
+      <button id="startBtn" onclick="startTimer()">Start</button>
+      <button id="resetBtn" onclick="resetTimer()">Reset</button>
+    </div>
+    <p id="time">0</p>
+    <p class="hint">Keep this tab open and allow audio to hear TTS alerts.</p>
+  </main>
+
+  <script>
+    const events = [
+      { time: 270, text: "Jungle boss spawning in 30 seconds." },
+      { time: 570, text: "Jungle camps spawning in 30 seconds." },
+      { time: 870, text: "Jungle boss spawning in 30 seconds." },
+      { time: 1170, text: "Jungle camps spawning in 30 seconds." },
+      { time: 1470, text: "Jungle boss spawning in 30 seconds." }
+    ];
+
+    let startTime = null;
+    let intervalId = null;
+    let triggered = new Set();
+
+    function speak(text) {
+      const msg = new SpeechSynthesisUtterance(text);
+      speechSynthesis.speak(msg);
+    }
+
+    function tick() {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      document.getElementById("time").innerText = String(elapsed);
+
+      events.forEach((e) => {
+        if (elapsed >= e.time && !triggered.has(e.time)) {
+          speak(e.text);
+          triggered.add(e.time);
+        }
+      });
+    }
+
+    function startTimer() {
+      if (intervalId !== null) return;
+      startTime = Date.now();
+      triggered = new Set();
+      tick();
+      intervalId = setInterval(tick, 500);
+    }
+
+    function resetTimer() {
+      if (intervalId !== null) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+      triggered = new Set();
+      startTime = null;
+      speechSynthesis.cancel();
+      document.getElementById("time").innerText = "0";
+    }
+  </script>
+</body>
+</html>
