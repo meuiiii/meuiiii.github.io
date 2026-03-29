@@ -88,6 +88,45 @@
       letter-spacing: 0.04em;
     }
 
+    .timer-config {
+      margin-top: 0.85rem;
+      display: grid;
+      gap: 0.35rem;
+      width: min(220px, 100%);
+    }
+
+    .timer-config-label {
+      font-size: 0.85rem;
+      color: #526474;
+    }
+
+    .duration-input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.55rem 0.65rem;
+      font-size: 0.95rem;
+      color: var(--text);
+      background: #fff;
+    }
+
+    .duration-input:disabled {
+      background: #f2f5f7;
+      color: #70808f;
+      cursor: not-allowed;
+    }
+
+    .duration-input.invalid {
+      border-color: #c75454;
+      background: #fff6f6;
+    }
+
+    .duration-status {
+      min-height: 1.2em;
+      font-size: 0.8rem;
+      color: #8a2f2f;
+    }
+
     .volume-control {
       margin-top: 0.75rem;
       display: grid;
@@ -255,6 +294,11 @@
       <button id="resetBtn" onclick="resetTimer()">Reset</button>
     </div>
     <p id="time">31:00</p>
+    <div class="timer-config">
+      <label class="timer-config-label" for="durationInput">Starting Timer Value</label>
+      <input id="durationInput" class="duration-input" type="text" value="31:00" placeholder="MM:SS" inputmode="numeric" oninput="handleDurationInput(this.value)" />
+      <p id="durationStatus" class="duration-status" aria-live="polite"></p>
+    </div>
     <div class="volume-control">
       <label class="volume-label" for="volumeSlider">TTS Volume: <span id="volumeValue">100%</span></label>
       <input id="volumeSlider" type="range" min="0" max="1" step="0.05" value="1" oninput="setTtsVolume(this.value)" />
@@ -266,7 +310,7 @@
     <p class="hint">Keep this tab open and allow audio to hear TTS alerts.</p>
     <section class="events-editor" aria-label="Edit alert timers">
       <p class="events-title">Edit Timers</p>
-      <p class="events-subtitle">Set each alert using the same countdown format as the timer above. Example: <strong>25:30</strong>. Changes apply directly from this page.</p>
+      <p class="events-subtitle">Set each alert using the same format as the timer above. Example: <strong>25:30</strong>. This would trigger the TTS alert when the timer hits 25:30.</p>
       <div id="eventList" class="event-list"></div>
       <div class="editor-actions">
         <button type="button" class="add-btn" onclick="addEventRow()">Add Timer</button>
@@ -276,9 +320,9 @@
     </section>
     <section class="howto" aria-label="How the timer works">
       <p class="howto-title">How this works</p>
-      <p>To use the timer, press start when the pre-war timer in game hits 1:00 minute exactly.</p>
-      <p>The timer will run in the background and remind you of each spawn timer 30 seconds prior via a basic text-to-speech voice.</p>
-      <p>When the war is complete the timer should reset itself to 31 minutes (1 minute for pre-war timer, and 30 minutes for war). If a war ends earlier than 30 minutes you can just manually reset it with the button.</p>
+      <p>To use the timer by default, press start when the pre-war timer in game hits 1:00 minute exactly. You can edit the starting time to match whatever you want. If you want to run it when the pre-war timer hits 2:00 minutes, you'd set it to 32:00, etc.</p>
+      <p>The timer will run in the background and remind you of each alert you have configured above when the timer reaches the specified time.</p>
+      <p>When the war is complete the timer resets to your selected starting value. If you want to restore the original 31:00 setup and alert list, use Reset Timers to Defaults.</p>
     </section>
   </main>
 
@@ -290,10 +334,13 @@
       { time: 1230, text: "Jungle camps spawning in 30 seconds." },
       { time: 1530, text: "Jungle camps spawning in 30 seconds." }
     ];
-    const TOTAL_SECONDS = 31 * 60;
+    const DEFAULT_DURATION_SECONDS = 31 * 60;
+    const MAX_DURATION_SECONDS = 60 * 60;
     const EVENTS_STORAGE_KEY = "wwm-gvg-timers-events";
 
     let events = defaultEvents.map((event) => ({ ...event }));
+    let configuredDurationSeconds = DEFAULT_DURATION_SECONDS;
+    let activeDurationSeconds = null;
     let endTime = null;
     let intervalId = null;
     let lastRemaining = null;
@@ -313,10 +360,10 @@
     }
 
     function elapsedToDisplayTime(elapsedSeconds) {
-      return formatTime(Math.max(TOTAL_SECONDS - elapsedSeconds, 0));
+      return formatTime(Math.max(configuredDurationSeconds - elapsedSeconds, 0));
     }
 
-    function displayToElapsedSeconds(displayValue) {
+    function parseDurationInput(displayValue) {
       const match = String(displayValue).trim().match(/^(\d{1,2}):(\d{2})$/);
       if (!match) return null;
 
@@ -326,16 +373,62 @@
         return null;
       }
 
-      const countdownSeconds = (minutes * 60) + seconds;
-      if (countdownSeconds < 0 || countdownSeconds > TOTAL_SECONDS) {
+      const totalSeconds = (minutes * 60) + seconds;
+      if (totalSeconds < 1 || totalSeconds > MAX_DURATION_SECONDS) {
         return null;
       }
 
-      return TOTAL_SECONDS - countdownSeconds;
+      return totalSeconds;
+    }
+
+    function displayToElapsedSeconds(displayValue) {
+      const countdownSeconds = parseDurationInput(displayValue);
+      if (countdownSeconds === null || countdownSeconds > configuredDurationSeconds) {
+        return null;
+      }
+
+      return configuredDurationSeconds - countdownSeconds;
     }
 
     function setEditorStatus(message) {
       document.getElementById("editorStatus").innerText = message;
+    }
+
+    function setDurationStatus(message) {
+      document.getElementById("durationStatus").innerText = message;
+    }
+
+    function updateDurationInputState() {
+      document.getElementById("durationInput").disabled = activeDurationSeconds !== null;
+    }
+
+    function syncDurationFromInput(displayValue) {
+      const durationInput = document.getElementById("durationInput");
+      const parsedDuration = parseDurationInput(displayValue);
+      const errorMessage = parsedDuration === null
+        ? `Starting timer must use MM:SS and stay between 00:01 and ${formatTime(MAX_DURATION_SECONDS)}.`
+        : "";
+
+      durationInput.classList.toggle("invalid", Boolean(errorMessage));
+      setDurationStatus(errorMessage);
+
+      if (errorMessage) {
+        return false;
+      }
+
+      configuredDurationSeconds = parsedDuration;
+      if (intervalId === null) {
+        renderTime(configuredDurationSeconds);
+      }
+      return true;
+    }
+
+    function handleDurationInput(displayValue) {
+      if (!syncDurationFromInput(displayValue)) {
+        return;
+      }
+
+      syncEventsFromEditor();
     }
 
     function eventToEditorRow(event) {
@@ -444,10 +537,13 @@
     }
 
     function resetEventsToDefaults() {
+      configuredDurationSeconds = DEFAULT_DURATION_SECONDS;
+      document.getElementById("durationInput").value = formatTime(configuredDurationSeconds);
+      syncDurationFromInput(document.getElementById("durationInput").value);
       clearSavedEventDraft();
       events = defaultEvents.map((event) => ({ ...event }));
       renderEventEditor(events.map(eventToEditorRow));
-      setEditorStatus("Timers restored to defaults.");
+      setEditorStatus("Timer setup restored to defaults.");
     }
 
     function syncEventsFromEditor() {
@@ -467,7 +563,7 @@
         messageInput.classList.toggle("invalid", message.length === 0);
 
         if (!errorMessage && elapsedTime === null) {
-          errorMessage = `Timer ${index + 1} must use MM:SS and stay between 00:00 and ${formatTime(TOTAL_SECONDS)}.`;
+          errorMessage = `Timer ${index + 1} must use MM:SS and stay between 00:00 and ${formatTime(configuredDurationSeconds)}.`;
         }
 
         if (!errorMessage && message.length === 0) {
@@ -559,7 +655,7 @@
 
     function tick() {
       const remaining = Math.max(Math.ceil((endTime - Date.now()) / 1000), 0);
-      const elapsed = TOTAL_SECONDS - remaining;
+      const elapsed = activeDurationSeconds - remaining;
 
       if (remaining !== lastRemaining) {
         renderTime(remaining);
@@ -579,11 +675,14 @@
     }
 
     function startTimer() {
+      if (!syncDurationFromInput(document.getElementById("durationInput").value)) return;
       if (!syncEventsFromEditor()) return;
       if (intervalId !== null) return;
-      endTime = Date.now() + (TOTAL_SECONDS * 1000);
+      activeDurationSeconds = configuredDurationSeconds;
+      endTime = Date.now() + (activeDurationSeconds * 1000);
       lastRemaining = null;
       triggered = new Set();
+      updateDurationInputState();
       tick();
       intervalId = setInterval(tick, 200);
     }
@@ -595,14 +694,18 @@
       }
       triggered = new Set();
       endTime = null;
+      activeDurationSeconds = null;
       lastRemaining = null;
       if (cancelSpeech) {
         speechSynthesis.cancel();
       }
-      renderTime(TOTAL_SECONDS);
+      updateDurationInputState();
+      renderTime(configuredDurationSeconds);
     }
 
-    renderTime(TOTAL_SECONDS);
+    updateDurationInputState();
+    renderTime(configuredDurationSeconds);
+    syncDurationFromInput(document.getElementById("durationInput").value);
     setTtsVolume(document.getElementById("volumeSlider").value);
     renderEventEditor();
     loadVoices();
