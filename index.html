@@ -88,10 +88,58 @@
       letter-spacing: 0.04em;
     }
 
+    .volume-control {
+      margin-top: 0.75rem;
+      display: grid;
+      gap: 0.3rem;
+      max-width: 320px;
+    }
+
+    .volume-label {
+      font-size: 0.85rem;
+      color: #526474;
+    }
+
+    .voice-select {
+      margin-top: 0.55rem;
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.4rem 0.5rem;
+      font-size: 0.85rem;
+      background: #fff;
+      color: var(--text);
+    }
+
+    #volumeSlider {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
     .hint {
       margin-top: 0.75rem;
       font-size: 0.9rem;
       color: #526474;
+    }
+
+    .howto {
+      margin-top: 1rem;
+      padding-top: 0.85rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.85rem;
+      color: #445868;
+      line-height: 1.45;
+    }
+
+    .howto-title {
+      margin: 0 0 0.4rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #2d4050;
+    }
+
+    .howto p {
+      margin: 0.45rem 0;
     }
   </style>
 </head>
@@ -102,31 +150,119 @@
       <button id="startBtn" onclick="startTimer()">Start</button>
       <button id="resetBtn" onclick="resetTimer()">Reset</button>
     </div>
-    <p id="time">0</p>
+    <p id="time">31:00</p>
+    <div class="volume-control">
+      <label class="volume-label" for="volumeSlider">TTS Volume: <span id="volumeValue">100%</span></label>
+      <input id="volumeSlider" type="range" min="0" max="1" step="0.05" value="1" oninput="setTtsVolume(this.value)" />
+      <label class="volume-label" for="voiceSelect">TTS Voice</label>
+      <select id="voiceSelect" class="voice-select" onchange="setVoice(this.value)">
+        <option value="">Loading voices...</option>
+      </select>
+    </div>
     <p class="hint">Keep this tab open and allow audio to hear TTS alerts.</p>
+    <section class="howto" aria-label="How the timer works">
+      <p class="howto-title">How this works</p>
+      <p>To use the timer, press start when the pre-war timer in game hits 1:00 minute exactly.</p>
+      <p>The timer will run in the background and remind you of each spawn timer 30 seconds prior via a basic text-to-speech voice.</p>
+      <p>When the war is complete the timer should reset itself to 31 minutes (1 minute for pre-war timer, and 30 minutes for war). If a war ends earlier than 30 minutes you can just manually reset it with the button.</p>
+    </section>
   </main>
 
   <script>
     const events = [
-      { time: 270, text: "Jungle boss spawning in 30 seconds." },
-      { time: 570, text: "Jungle camps spawning in 30 seconds." },
-      { time: 870, text: "Jungle boss spawning in 30 seconds." },
-      { time: 1170, text: "Jungle camps spawning in 30 seconds." },
-      { time: 1470, text: "Jungle boss spawning in 30 seconds." }
+      { time: 370, text: "Jungle boss spawning in 30 seconds." },
+      { time: 670, text: "Jungle camps spawning in 30 seconds." },
+      { time: 970, text: "Jungle boss spawning in 30 seconds." },
+      { time: 1270, text: "Jungle camps spawning in 30 seconds." },
+      { time: 1570, text: "Jungle boss spawning in 30 seconds." }
     ];
+    const TOTAL_SECONDS = 31 * 60;
 
     let startTime = null;
     let intervalId = null;
     let triggered = new Set();
+    let ttsVolume = 1;
+    let availableVoices = [];
+    let selectedVoiceURI = "";
+
+    function formatTime(totalSeconds) {
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    }
+
+    function renderTime(totalSeconds) {
+      document.getElementById("time").innerText = formatTime(totalSeconds);
+    }
+
+    function setTtsVolume(value) {
+      ttsVolume = Math.max(0, Math.min(1, Number(value)));
+      document.getElementById("volumeValue").innerText = `${Math.round(ttsVolume * 100)}%`;
+    }
+
+    function setVoice(voiceURI) {
+      selectedVoiceURI = voiceURI;
+    }
+
+    function chooseDefaultVoice(voices) {
+      const preferredPatterns = [
+        /google us english/i,
+        /samantha/i,
+        /alloy|nova|aria/i,
+        /english.*(natural|neural)/i,
+        /en-/i,
+        /en_/i
+      ];
+
+      for (const pattern of preferredPatterns) {
+        const match = voices.find((voice) => pattern.test(voice.name) || pattern.test(voice.lang));
+        if (match) return match;
+      }
+
+      return voices[0] || null;
+    }
+
+    function loadVoices() {
+      availableVoices = speechSynthesis.getVoices();
+      const select = document.getElementById("voiceSelect");
+      select.innerHTML = "";
+
+      if (availableVoices.length === 0) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "Default browser voice";
+        select.appendChild(option);
+        selectedVoiceURI = "";
+        return;
+      }
+
+      availableVoices.forEach((voice) => {
+        const option = document.createElement("option");
+        option.value = voice.voiceURI;
+        option.textContent = `${voice.name} (${voice.lang})`;
+        select.appendChild(option);
+      });
+
+      const defaultVoice = chooseDefaultVoice(availableVoices);
+      selectedVoiceURI = defaultVoice ? defaultVoice.voiceURI : "";
+      select.value = selectedVoiceURI;
+    }
 
     function speak(text) {
       const msg = new SpeechSynthesisUtterance(text);
+      const selected = availableVoices.find((voice) => voice.voiceURI === selectedVoiceURI);
+      if (selected) {
+        msg.voice = selected;
+      }
+      msg.volume = ttsVolume;
+      msg.rate = 0.95;
       speechSynthesis.speak(msg);
     }
 
     function tick() {
       const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      document.getElementById("time").innerText = String(elapsed);
+      const remaining = Math.max(TOTAL_SECONDS - elapsed, 0);
+      renderTime(remaining);
 
       events.forEach((e) => {
         if (elapsed >= e.time && !triggered.has(e.time)) {
@@ -134,6 +270,10 @@
           triggered.add(e.time);
         }
       });
+
+      if (remaining === 0) {
+        resetTimer(false);
+      }
     }
 
     function startTimer() {
@@ -144,16 +284,23 @@
       intervalId = setInterval(tick, 500);
     }
 
-    function resetTimer() {
+    function resetTimer(cancelSpeech = true) {
       if (intervalId !== null) {
         clearInterval(intervalId);
         intervalId = null;
       }
       triggered = new Set();
       startTime = null;
-      speechSynthesis.cancel();
-      document.getElementById("time").innerText = "0";
+      if (cancelSpeech) {
+        speechSynthesis.cancel();
+      }
+      renderTime(TOTAL_SECONDS);
     }
+
+    renderTime(TOTAL_SECONDS);
+    setTtsVolume(document.getElementById("volumeSlider").value);
+    loadVoices();
+    speechSynthesis.onvoiceschanged = loadVoices;
   </script>
 </body>
 </html>
