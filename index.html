@@ -141,6 +141,94 @@
     .howto p {
       margin: 0.45rem 0;
     }
+
+    .events-editor {
+      margin-top: 1rem;
+      padding-top: 0.85rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .events-title {
+      margin: 0 0 0.4rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #2d4050;
+    }
+
+    .events-subtitle {
+      margin: 0 0 0.85rem;
+      font-size: 0.83rem;
+      color: #526474;
+      line-height: 1.4;
+    }
+
+    .event-list {
+      display: grid;
+      gap: 0.7rem;
+    }
+
+    .event-row {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr) auto;
+      gap: 0.6rem;
+      align-items: center;
+    }
+
+    .event-input,
+    .message-input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.55rem 0.65rem;
+      font-size: 0.9rem;
+      color: var(--text);
+      background: #fff;
+    }
+
+    .event-input.invalid,
+    .message-input.invalid {
+      border-color: #c75454;
+      background: #fff6f6;
+    }
+
+    .remove-btn,
+    .add-btn {
+      border-radius: 8px;
+      padding: 0.55rem 0.85rem;
+      font-size: 0.85rem;
+    }
+
+    .remove-btn {
+      background: #f7e3e3;
+      color: #8a2f2f;
+    }
+
+    .remove-btn:hover {
+      background: #f1d3d3;
+    }
+
+    .add-btn {
+      margin-top: 0.85rem;
+      background: #e3eef5;
+      color: #27485d;
+    }
+
+    .add-btn:hover {
+      background: #d4e4ef;
+    }
+
+    .editor-status {
+      margin-top: 0.65rem;
+      min-height: 1.2em;
+      font-size: 0.8rem;
+      color: #8a2f2f;
+    }
+
+    @media (max-width: 640px) {
+      .event-row {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 <body>
@@ -160,6 +248,13 @@
       </select>
     </div>
     <p class="hint">Keep this tab open and allow audio to hear TTS alerts.</p>
+    <section class="events-editor" aria-label="Edit alert timers">
+      <p class="events-title">Edit Timers</p>
+      <p class="events-subtitle">Set each alert using the same countdown format as the timer above. Example: <strong>25:30</strong>. Changes apply directly from this page.</p>
+      <div id="eventList" class="event-list"></div>
+      <button type="button" class="add-btn" onclick="addEventRow()">Add Timer</button>
+      <p id="editorStatus" class="editor-status" aria-live="polite"></p>
+    </section>
     <section class="howto" aria-label="How the timer works">
       <p class="howto-title">How this works</p>
       <p>To use the timer, press start when the pre-war timer in game hits 1:00 minute exactly.</p>
@@ -169,17 +264,19 @@
   </main>
 
   <script>
-    const events = [
-      { time: 370, text: "Jungle boss spawning in 30 seconds." },
-      { time: 670, text: "Jungle camps spawning in 30 seconds." },
-      { time: 970, text: "Jungle boss spawning in 30 seconds." },
-      { time: 1270, text: "Jungle camps spawning in 30 seconds." },
-      { time: 1570, text: "Jungle boss spawning in 30 seconds." }
+    const defaultEvents = [
+      { time: 330, text: "Jungle boss spawning in 30 seconds." },
+      { time: 630, text: "Jungle camps spawning in 30 seconds." },
+      { time: 930, text: "Jungle boss spawning in 30 seconds." },
+      { time: 1230, text: "Jungle camps spawning in 30 seconds." },
+      { time: 1530, text: "Jungle boss spawning in 30 seconds." }
     ];
     const TOTAL_SECONDS = 31 * 60;
 
-    let startTime = null;
+    let events = defaultEvents.map((event) => ({ ...event }));
+    let endTime = null;
     let intervalId = null;
+    let lastRemaining = null;
     let triggered = new Set();
     let ttsVolume = 1;
     let availableVoices = [];
@@ -193,6 +290,122 @@
 
     function renderTime(totalSeconds) {
       document.getElementById("time").innerText = formatTime(totalSeconds);
+    }
+
+    function elapsedToDisplayTime(elapsedSeconds) {
+      return formatTime(Math.max(TOTAL_SECONDS - elapsedSeconds, 0));
+    }
+
+    function displayToElapsedSeconds(displayValue) {
+      const match = String(displayValue).trim().match(/^(\d{1,2}):(\d{2})$/);
+      if (!match) return null;
+
+      const minutes = Number(match[1]);
+      const seconds = Number(match[2]);
+      if (Number.isNaN(minutes) || Number.isNaN(seconds) || seconds > 59) {
+        return null;
+      }
+
+      const countdownSeconds = (minutes * 60) + seconds;
+      if (countdownSeconds < 0 || countdownSeconds > TOTAL_SECONDS) {
+        return null;
+      }
+
+      return TOTAL_SECONDS - countdownSeconds;
+    }
+
+    function setEditorStatus(message) {
+      document.getElementById("editorStatus").innerText = message;
+    }
+
+    function createEventRow(event = { time: 0, text: "New alert" }) {
+      const row = document.createElement("div");
+      row.className = "event-row";
+
+      const timeInput = document.createElement("input");
+      timeInput.type = "text";
+      timeInput.className = "event-input";
+      timeInput.placeholder = "MM:SS";
+      timeInput.value = elapsedToDisplayTime(event.time);
+      timeInput.setAttribute("aria-label", "Alert time");
+      timeInput.addEventListener("input", syncEventsFromEditor);
+
+      const messageInput = document.createElement("input");
+      messageInput.type = "text";
+      messageInput.className = "message-input";
+      messageInput.placeholder = "Alert message";
+      messageInput.value = event.text;
+      messageInput.setAttribute("aria-label", "Alert message");
+      messageInput.addEventListener("input", syncEventsFromEditor);
+
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "remove-btn";
+      removeButton.innerText = "Remove";
+      removeButton.addEventListener("click", () => {
+        row.remove();
+        syncEventsFromEditor();
+      });
+
+      row.appendChild(timeInput);
+      row.appendChild(messageInput);
+      row.appendChild(removeButton);
+      return row;
+    }
+
+    function renderEventEditor() {
+      const eventList = document.getElementById("eventList");
+      eventList.innerHTML = "";
+      events.forEach((event) => {
+        eventList.appendChild(createEventRow(event));
+      });
+      syncEventsFromEditor();
+    }
+
+    function addEventRow() {
+      document.getElementById("eventList").appendChild(createEventRow({ time: 0, text: "New alert" }));
+      syncEventsFromEditor();
+    }
+
+    function syncEventsFromEditor() {
+      const rows = Array.from(document.querySelectorAll(".event-row"));
+      const nextEvents = [];
+      let errorMessage = "";
+
+      rows.forEach((row, index) => {
+        const timeInput = row.querySelector(".event-input");
+        const messageInput = row.querySelector(".message-input");
+        const elapsedTime = displayToElapsedSeconds(timeInput.value);
+        const message = messageInput.value.trim();
+
+        timeInput.classList.toggle("invalid", elapsedTime === null);
+        messageInput.classList.toggle("invalid", message.length === 0);
+
+        if (!errorMessage && elapsedTime === null) {
+          errorMessage = `Timer ${index + 1} must use MM:SS and stay between 00:00 and ${formatTime(TOTAL_SECONDS)}.`;
+        }
+
+        if (!errorMessage && message.length === 0) {
+          errorMessage = `Timer ${index + 1} needs a message.`;
+        }
+
+        if (elapsedTime !== null && message.length > 0) {
+          nextEvents.push({ time: elapsedTime, text: message });
+        }
+      });
+
+      if (rows.length === 0) {
+        errorMessage = "Add at least one timer before starting.";
+      }
+
+      setEditorStatus(errorMessage);
+
+      if (errorMessage) {
+        return false;
+      }
+
+      events = nextEvents.sort((left, right) => left.time - right.time);
+      return true;
     }
 
     function setTtsVolume(value) {
@@ -260,9 +473,13 @@
     }
 
     function tick() {
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      const remaining = Math.max(TOTAL_SECONDS - elapsed, 0);
-      renderTime(remaining);
+      const remaining = Math.max(Math.ceil((endTime - Date.now()) / 1000), 0);
+      const elapsed = TOTAL_SECONDS - remaining;
+
+      if (remaining !== lastRemaining) {
+        renderTime(remaining);
+        lastRemaining = remaining;
+      }
 
       events.forEach((e) => {
         if (elapsed >= e.time && !triggered.has(e.time)) {
@@ -277,11 +494,13 @@
     }
 
     function startTimer() {
+      if (!syncEventsFromEditor()) return;
       if (intervalId !== null) return;
-      startTime = Date.now();
+      endTime = Date.now() + (TOTAL_SECONDS * 1000);
+      lastRemaining = null;
       triggered = new Set();
       tick();
-      intervalId = setInterval(tick, 500);
+      intervalId = setInterval(tick, 200);
     }
 
     function resetTimer(cancelSpeech = true) {
@@ -290,7 +509,8 @@
         intervalId = null;
       }
       triggered = new Set();
-      startTime = null;
+      endTime = null;
+      lastRemaining = null;
       if (cancelSpeech) {
         speechSynthesis.cancel();
       }
@@ -299,6 +519,7 @@
 
     renderTime(TOTAL_SECONDS);
     setTtsVolume(document.getElementById("volumeSlider").value);
+    renderEventEditor();
     loadVoices();
     speechSynthesis.onvoiceschanged = loadVoices;
   </script>
